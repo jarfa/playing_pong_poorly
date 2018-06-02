@@ -2,6 +2,13 @@
 import numpy as np
 import pickle
 import gym
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s %(message)s",
+    datefmt="%Y.%m.%d %I:%M:%S",
+    level=logging.DEBUG
+)
 
 def sigmoid(x):
     # sigmoid "squashing" function to interval [0,1]
@@ -147,16 +154,18 @@ while True:
         # boring book-keeping
         running_reward = reward_sum if running_reward is None else running_reward * \
             0.99 + reward_sum * 0.01
-        print('resetting env. episode reward total was %f. running mean: %f' % (
-            reward_sum, running_reward))
+        logging.info(
+            "resetting env. episode reward total was %f. running mean: %f",
+            reward_sum, running_reward
+        )
         if episode_number % 100 == 0:
             pickle.dump(model, open('save.p', 'wb'))
         reward_sum = 0
-        observation = env.reset()  # reset env
+        observation = env.reset()  # resetg env
         prev_x = None
 
     if reward != 0:  # Pong has either +1 or -1 reward exactly when game ends.
-        print(
-            "ep %d: game finished, reward %f%s" % (
-                episode_number, reward, "" if reward == -1 else " !!!!!!!!")
+        logging.info(
+            "ep %d: game finished, reward %f%s",
+            episode_number, reward, "" if reward == -1 else " !!!!!!!!"
         )
