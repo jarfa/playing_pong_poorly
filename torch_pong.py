@@ -46,11 +46,11 @@ class Policy(nn.Module):
 
     def select_action(self, state):
         processed_state = prepro(state)
-        tensor_state = torch.from_numpy(processed_state).float().unsqueeze(0) #.cuda()
+        tensor_state = torch.from_numpy(processed_state).float().unsqueeze(0).cuda()
 
         probs = self.__call__(tensor_state)
         m = Categorical(probs)
-        action = m.sample() #.cuda()
+        action = m.sample()
         self.saved_log_probs.append(m.log_prob(action))
 
         # action is in {0,1}, but for gym it needs to be in {2,3}
@@ -65,14 +65,14 @@ class Policy(nn.Module):
                 R = gamma * R +  r
                 rewards.insert(0, R)
 
-            rewards = torch.tensor(rewards) #.cuda()
+            rewards = torch.tensor(rewards).cuda()
             rewards = (rewards - rewards.mean()) / (rewards.std() + EPSILON)
 
             mult = -1 if objective == "win" else 1
             for log_prob, reward in zip(self.saved_log_probs, rewards):
                 policy_loss.append(mult * log_prob * reward)
 
-            final_loss = torch.cat(policy_loss).sum() #.cuda()
+            final_loss = torch.cat(policy_loss).sum()
         elif objective == "length":
             # Our loss function is -num_frames
             final_loss = -1. * self.num_frames * sum(self.saved_log_probs)
@@ -108,7 +108,7 @@ def main(args):
     ENV.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    policy = Policy(H=200, D=80 * 80) #.cuda()
+    policy = Policy(H=200, D=80 * 80).cuda()
     optimizer = optim.Adam(policy.parameters(), lr=args.lr)
 
     ewma_reward = 0
@@ -116,7 +116,7 @@ def main(args):
     for i_episode in count(1):
         state = ENV.reset()
         match_reward = 0
-        for t in range(10 ** 4):  # Don't infinite loop while learning
+        for _ in range(10 ** 4):  # Don't infinite loop while learning
             action = policy.select_action(state)
             state, reward, done, _ = ENV.step(action)
             if args.render:
