@@ -100,6 +100,10 @@ def prepro(I):
     return I.astype(np.float).ravel()
 
 
+def update_mean(n, old_mean, new_data):
+    return ((n - 1) * old_mean + new_data) / n
+
+
 def main(args):
     ENV.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -107,7 +111,8 @@ def main(args):
     policy = Policy(H=200, D=80 * 80) #.cuda()
     optimizer = optim.Adam(policy.parameters(), lr=args.lr)
 
-    ewma_reward = None
+    ewma_reward = 0
+    ewma_frames = 0
     for i_episode in count(1):
         state = ENV.reset()
         match_reward = 0
@@ -121,15 +126,21 @@ def main(args):
             if done:
                 break
 
-        if ewma_reward is None:
-            ewma_reward = match_reward
+        # Take the first 20 episodes to 'seed' the EWMA, then do it the normal way
+        seed_episodes = 20
+        if i_episode <= seed_episodes:
+            ewma_reward = update_mean(i_episode, ewma_reward, match_reward)
+            ewma_frames = update_mean(i_episode, ewma_frames, policy.num_frames)
         else:
             ewma_reward = ewma_reward * 0.99 + match_reward * 0.01
+            ewma_frames = ewma_frames * 0.99 + policy.num_frames * 0.01
 
         if i_episode % args.log_interval == 0:
             logging.info(
-                "Episode %d\tLast Reward: %d\tEWMA Reward: %.2f\tFrames: %d",
-                i_episode, match_reward, ewma_reward, policy.num_frames
+                "Episode %d\tLast Reward: %d\tEWMA Reward: %.2f\t"
+                "Frames: %d\tEWMA Frames: %.2f",
+                i_episode, match_reward, ewma_reward, policy.num_frames,
+                ewma_frames
             )
         policy.finish_episode(args.objective, args.gamma, optimizer)
 
