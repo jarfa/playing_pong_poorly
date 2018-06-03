@@ -23,6 +23,10 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
+ENV = gym.make('Pong-v0')
+EPSILON = np.finfo(np.float32).eps.item()
+
+
 class Policy(nn.Module):
     def __init__(self, D, H):
         super(Policy, self).__init__()
@@ -31,18 +35,58 @@ class Policy(nn.Module):
 
         self.saved_log_probs = []
         self.rewards = []
+        self.num_frames = 0
 
     def forward(self, x):
+        self.num_frames += 1
+
         h = F.relu(self.hidden(x))
         logp = self.out(h)
-        return  F.softmax(logp, dim=1)#F.sigmoid(logp)
+        return F.softmax(logp, dim=1)
 
-# DEVICE = torch.device('cpu')
-# DEVICE = torch.device('cuda') # Uncomment this to run on GPU
-ENV = gym.make('Pong-v0')
-POLICY = Policy(H=200, D=80 * 80)
-OPTIMIZER = optim.Adam(POLICY.parameters(), lr=1e-2)
-EPSILON = np.finfo(np.float32).eps.item()
+    def select_action(self, state):
+        processed_state = prepro(state)
+        tensor_state = torch.from_numpy(processed_state).float().unsqueeze(0) #.cuda()
+
+        probs = self.__call__(tensor_state)
+        m = Categorical(probs)
+        action = m.sample() #.cuda()
+        self.saved_log_probs.append(m.log_prob(action))
+
+        # action is in {0,1}, but for gym it needs to be in {2,3}
+        return action.item() + 2
+
+    def finish_episode(self, objective, gamma, optimizer):
+        R = 0
+        policy_loss = []
+        if objective in ("win", "lose"):
+            rewards = []
+            for r in self.rewards[::-1]:
+                R = gamma * R +  r
+                rewards.insert(0, R)
+
+            rewards = torch.tensor(rewards) #.cuda()
+            rewards = (rewards - rewards.mean()) / (rewards.std() + EPSILON)
+
+            mult = -1 if objective == "win" else 1
+            for log_prob, reward in zip(self.saved_log_probs, rewards):
+                policy_loss.append(mult * log_prob * reward)
+
+            final_loss = torch.cat(policy_loss).sum() #.cuda()
+        elif objective == "length":
+            # Our loss function is -num_frames
+            final_loss = -1. * self.num_frames * sum(self.saved_log_probs)
+            #TODO: will this work?
+        else:
+            raise NotImplementedError
+
+        optimizer.zero_grad()
+        final_loss.backward()
+        optimizer.step()
+        self.num_frames = 0
+        del self.rewards[:]
+        del self.saved_log_probs[:]
+
 
 def prepro(I):
     """ Preprocess 210x160x3 uint8 frame into 6400 (80x80) 1D float vector.
@@ -56,73 +100,45 @@ def prepro(I):
     return I.astype(np.float).ravel()
 
 
-def select_action(state):
-    # TODO: should this be a method of POLICY?
-    processed_state = prepro(state)
-    tensor_state = torch.from_numpy(processed_state).float().unsqueeze(0)
-
-    probs = POLICY(tensor_state)
-    m = Categorical(probs)
-    action = m.sample()
-    POLICY.saved_log_probs.append(m.log_prob(action))
-
-    # action is in {0,1}, but for gym it needs to be in {2,3}
-    action_for_gym = action.item() + 2
-    return action_for_gym
-
-
-def finish_episode(gamma):
-    # TODO: should this be a method of POLICY?
-    R = 0
-    policy_loss = []
-    rewards = []
-    for r in POLICY.rewards[::-1]:
-        R = gamma * R +  r
-        rewards.insert(0, R)
-    rewards = torch.tensor(rewards)
-    rewards = (rewards - rewards.mean()) / (rewards.std() + EPSILON)
-    for log_prob, reward in zip(POLICY.saved_log_probs, rewards):
-        policy_loss.append(-log_prob * reward)
-    OPTIMIZER.zero_grad()
-    policy_loss = torch.cat(policy_loss).sum()
-    policy_loss.backward()
-    OPTIMIZER.step()
-    del POLICY.rewards[:]
-    del POLICY.saved_log_probs[:]
-
-
 def main(args):
     ENV.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    running_reward = None
+    policy = Policy(H=200, D=80 * 80) #.cuda()
+    optimizer = optim.Adam(policy.parameters(), lr=args.lr)
+
+    ewma_reward = None
     for i_episode in count(1):
         state = ENV.reset()
         match_reward = 0
         for t in range(10 ** 4):  # Don't infinite loop while learning
-            action = select_action(state)
+            action = policy.select_action(state)
             state, reward, done, _ = ENV.step(action)
             if args.render:
                 ENV.render()
-            POLICY.rewards.append(reward)
+            policy.rewards.append(reward)
             match_reward += reward
             if done:
                 break
 
-        if running_reward is None:
-            running_reward = match_reward
+        if ewma_reward is None:
+            ewma_reward = match_reward
         else:
-            running_reward = running_reward * 0.99 + match_reward * 0.01
-        finish_episode(args.gamma)
+            ewma_reward = ewma_reward * 0.99 + match_reward * 0.01
+
         if i_episode % args.log_interval == 0:
             logging.info(
-                "Episode %d\tLast Reward: %d\tEWMA Reward: %.2f",
-                i_episode, match_reward, running_reward
+                "Episode %d\tLast Reward: %d\tEWMA Reward: %.2f\tFrames: %d",
+                i_episode, match_reward, ewma_reward, policy.num_frames
             )
+        policy.finish_episode(args.objective, args.gamma, optimizer)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="PyTorch REINFORCE example")
+    parser = argparse.ArgumentParser(
+        description="Would you like to play a game?")
+    parser.add_argument("--lr", type=float, default=1e-3, metavar="L",
+                        help="learning rate (default: 1e-3)")
     parser.add_argument("--gamma", type=float, default=0.99, metavar="G",
                         help="discount factor (default: 0.99)")
     parser.add_argument("--seed", type=int, default=543, metavar="N",
@@ -131,4 +147,7 @@ if __name__ == "__main__":
                         help="render the environment")
     parser.add_argument("--log-interval", type=int, default=10, metavar="N",
                         help="interval between training status logs (default: 10)")
+    parser.add_argument("--objective", type=str, default="win",
+                        choices=["win", "lose", "length"],
+                        help="What's the objective of our RL agent?")
     main(parser.parse_args())
