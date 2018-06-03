@@ -144,6 +144,21 @@ def main(args):
             )
         policy.finish_episode(args.objective, args.gamma, optimizer)
 
+        # only save when i_episode is a power of 2, but skip the range [2,16]
+        if (args.save_path and (i_episode & (i_episode - 1) == 0) and
+            (i_episode < 2 or i_episode > 16)):
+            info = {
+                "episode": i_episode,
+                "arch": args.__dict__,
+                "state_dict": policy.state_dict(),
+                "optimizer" : optimizer.state_dict(),
+                "ewma_frames": ewma_frames,
+                "ewma_reward": ewma_reward,
+            }
+            filename = "{base}_{i:06d}.pth.tar".format(
+                base=args.save_path, i=i_episode)
+            with open(filename, "wb") as f:
+                torch.save(info, f)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -161,4 +176,7 @@ if __name__ == "__main__":
     parser.add_argument("--objective", type=str, default="win",
                         choices=["win", "lose", "length"],
                         help="What's the objective of our RL agent?")
+    parser.add_argument("--save_path", type=str, default=None, metavar="F",
+                        help="Base path to save model parameters to (optional).")
+
     main(parser.parse_args())
