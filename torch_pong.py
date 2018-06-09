@@ -88,7 +88,22 @@ class Policy(nn.Module):
                 rewards_to_learn.insert(0, mult * R)
 
         elif objective == "length":
-            raise NotImplementedError("Implement me!!!")
+            rewards_to_learn = [0] * len(self.rewards)
+            match_index = len(self.num_frames) - 1 #start by looking at the last game
+            for i, r in enumerate(reversed(self.rewards)):
+                indx = len(self.rewards) - i - 1
+                if r == 0:
+                    # This frame didn't have a point scored, so pull the
+                    # eventual number of frames from the next frame
+                    rewards_to_learn[indx] = rewards_to_learn[indx + 1]
+                    # I don't think we should be decaying the reward for this
+                    # type of learning, all moves made were equally important
+                    # in prolonging the match.
+                else:
+                    # This marks a point scored, so record the number of frames
+                    # it took
+                    rewards_to_learn[indx] = -1.0 * self.num_frames[match_index]
+                    match_index -= 1
 
         rewards_to_learn = torch.tensor(rewards_to_learn).cuda()
         rewards_to_learn = (rewards_to_learn - rewards_to_learn.mean()
@@ -157,7 +172,6 @@ def main(args):
                 i_episode, win_rate, ewma_win_rate, frames_per_game,
                 ewma_frames
             )
-
 
         # only save when i_episode is a power of 2, but skip the range [2,16]
         if (args.save_path and (i_episode & (i_episode - 1) == 0) and
