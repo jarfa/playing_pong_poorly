@@ -39,10 +39,11 @@ def prepro(I):
 
 
 class Policy(nn.Module):
-    def __init__(self, D, H):
+    def __init__(self, D, H, gpu):
         super(Policy, self).__init__()
         self.hidden = torch.nn.Linear(D, H)
         self.out = torch.nn.Linear(H, 2)
+        self.gpu = gpu
 
         self.saved_log_probs = []
         self.rewards = []
@@ -55,7 +56,9 @@ class Policy(nn.Module):
 
     def select_action(self, state):
         processed_state = prepro(state)
-        tensor_state = torch.from_numpy(processed_state).float().unsqueeze(0).cuda()
+        tensor_state = torch.from_numpy(processed_state).float().unsqueeze(0)
+        if self.gpu:
+            tensor_state = tensor_state.cuda()
 
         probs = self.__call__(tensor_state)
         m = Categorical(probs)
@@ -104,12 +107,14 @@ class Policy(nn.Module):
                     rewards_to_learn[indx] = -1.0 * self.num_frames[match_index]
                     match_index -= 1
 
-        rewards_to_learn = torch.tensor(rewards_to_learn).cuda()
+        rewards_to_learn = torch.tensor(rewards_to_learn)
+        if self.gpu:
+            rewards_to_learn = rewards_to_learn.cuda()
         rewards_to_learn = (rewards_to_learn - rewards_to_learn.mean()
                             ) / (rewards_to_learn.std() + EPSILON)
 
         policy_loss = torch.dot(
-            torch.cat(self.saved_log_probs).cuda(),
+            torch.cat(self.saved_log_probs),
             rewards_to_learn
         )
         final_loss = policy_loss.sum()
@@ -134,7 +139,9 @@ def main(args):
     environment.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    policy = Policy(H=200, D=80 * 80).cuda()
+    policy = Policy(H=200, D=80 * 80, gpu=args.gpu)
+    if args.gpu:
+        policy = policy.cuda()
     optimizer = optim.Adam(policy.parameters(), lr=args.lr)
 
     ewma_win_rate = 0
@@ -200,6 +207,8 @@ if __name__ == "__main__":
                         help="random seed (default: 543)")
     parser.add_argument("--render", action="store_true",
                         help="render the environment")
+    parser.add_argument("--cpu", dest="gpu", action="store_false",
+                        help="run on the CPU, don't use cuda (default: False)")
     parser.add_argument("--log-interval", type=int, default=10, metavar="N",
                         help="interval between training status logs (default: 10)")
     parser.add_argument("--objective", type=str, default="win",
