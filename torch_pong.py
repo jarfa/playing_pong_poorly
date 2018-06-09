@@ -23,7 +23,6 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
-ENV = gym.make('Pong-v0')
 EPSILON = np.finfo(np.float32).eps.item()
 
 
@@ -131,7 +130,8 @@ def update_mean(n, old_mean, new_data):
 
 
 def main(args):
-    ENV.seed(args.seed)
+    environment = gym.make('Pong-v0')
+    environment.seed(args.seed)
     torch.manual_seed(args.seed)
 
     policy = Policy(H=200, D=80 * 80).cuda()
@@ -141,12 +141,12 @@ def main(args):
     ewma_frames = 0
     current_frames = 0
     for i_episode in count(1):
-        state = ENV.reset()
+        state = environment.reset()
         for _ in range(10 ** 4):  # Don't infinite loop while learning
             action = policy.select_action(state)
-            state, reward, done, _ = ENV.step(action)
+            state, reward, done, _ = environment.step(action)
             if args.render:
-                ENV.render()
+                environment.render()
             policy.rewards.append(reward)
             current_frames += 1
             if reward != 0:
