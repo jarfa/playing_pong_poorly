@@ -26,6 +26,14 @@ logging.basicConfig(
 EPSILON = np.finfo(np.float32).eps.item()
 
 
+def update_mean(n, old, new):
+    return ((n - 1) * old + new) / n
+
+
+def update_ewma(old, new, alpha=0.05):
+    return (1. - alpha) * old + alpha * new
+
+
 def prepro(I):
     """ Preprocess 210x160x3 uint8 frame into 6400 (80x80) 1D float vector.
     This function is copied almost verbatim from Karpathy's code.
@@ -130,10 +138,6 @@ class Policy(nn.Module):
         return win_rate, frames_per_game
 
 
-def update_mean(n, old_mean, new_data):
-    return ((n - 1) * old_mean + new_data) / n
-
-
 def main(args):
     environment = gym.make('Pong-v0')
     environment.seed(args.seed)
@@ -148,19 +152,21 @@ def main(args):
     ewma_frames = 0
     current_frames = 0
     for i_batch in count(1):
+        state = environment.reset()
         for _ in range(args.minibatch):
             # args.minibatch is the number of games to play. Let's define a game
             # as ending when a point is scored by either team. The default gym
             # behavior is to play until a team has 21 points, but we're not
             # using that.
-            state = environment.reset()
             for i in range(10 ** 4):  # to avoid infinite loops
                 action = policy.select_action(state)
-                state, reward, _, _ = environment.step(action)
+                state, reward, done, _ = environment.step(action)
                 if args.render:
                     environment.render()
                 policy.rewards.append(reward)
                 current_frames += 1
+                if done:
+                    state = environment.reset()
                 if reward != 0:
                     break
 
@@ -174,8 +180,8 @@ def main(args):
             ewma_win_rate = update_mean(i_batch, ewma_win_rate, win_rate)
             ewma_frames = update_mean(i_batch, ewma_frames, frames_per_game)
         else:
-            ewma_win_rate = ewma_win_rate * 0.99 + win_rate * 0.01
-            ewma_frames = ewma_frames * 0.99 + frames_per_game * 0.01
+            ewma_win_rate = update_ewma(ewma_win_rate, win_rate)
+            ewma_frames = update_ewma(ewma_frames, frames_per_game)
 
         if i_batch % args.log_interval == 0:
             logging.info(
