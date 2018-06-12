@@ -147,44 +147,49 @@ def main(args):
     ewma_win_rate = 0
     ewma_frames = 0
     current_frames = 0
-    for i_episode in count(1):
-        state = environment.reset()
-        for _ in range(10 ** 4):  # Don't infinite loop while learning
-            action = policy.select_action(state)
-            state, reward, done, _ = environment.step(action)
-            if args.render:
-                environment.render()
-            policy.rewards.append(reward)
-            current_frames += 1
-            if reward != 0:
-                policy.num_frames.append(current_frames)
-                current_frames = 0
-            if done:
-                break
+    for i_batch in count(1):
+        for _ in range(args.minibatch):
+            # args.minibatch is the number of games to play. Let's define a game
+            # as ending when a point is scored by either team. The default gym
+            # behavior is to play until a team has 21 points, but we're not
+            # using that.
+            state = environment.reset()
+            for i in range(10 ** 4):  # to avoid infinite loops
+                action = policy.select_action(state)
+                state, reward, _, _ = environment.step(action)
+                if args.render:
+                    environment.render()
+                policy.rewards.append(reward)
+                current_frames += 1
+                if reward != 0:
+                    break
+
+            policy.num_frames.append(current_frames)
+            current_frames = 0
 
         win_rate, frames_per_game = policy.finish_episode(
             args.objective, args.gamma, optimizer)
         # Take the first 20 episodes to 'seed' the EWMA, then do it the normal way
-        if i_episode <= 20:
-            ewma_win_rate = update_mean(i_episode, ewma_win_rate, win_rate)
-            ewma_frames = update_mean(i_episode, ewma_frames, frames_per_game)
+        if i_batch <= 20:
+            ewma_win_rate = update_mean(i_batch, ewma_win_rate, win_rate)
+            ewma_frames = update_mean(i_batch, ewma_frames, frames_per_game)
         else:
             ewma_win_rate = ewma_win_rate * 0.99 + win_rate * 0.01
             ewma_frames = ewma_frames * 0.99 + frames_per_game * 0.01
 
-        if i_episode % args.log_interval == 0:
+        if i_batch % args.log_interval == 0:
             logging.info(
-                "Episode %d\tLast Win Rate: %.2f\tEWMA Win Rate: %.2f\t"
+                "Batch #%d\tLast Win Rate: %.2f\tEWMA Win Rate: %.2f\t"
                 "Frames/Game: %d\tEWMA Frames/Game: %.1f",
-                i_episode, win_rate, ewma_win_rate, frames_per_game,
-                ewma_frames
+                i_batch, win_rate, ewma_win_rate,
+                frames_per_game, ewma_frames
             )
 
-        # only save when i_episode is a power of 2, but skip the range [2,16]
-        if (args.save_path and (i_episode & (i_episode - 1) == 0) and
-            (i_episode < 2 or i_episode > 16)):
+        # only save when i_batch is a power of 2, but skip the range [2,16]
+        if (args.save_path and (i_batch & (i_batch - 1) == 0) and
+            (i_batch < 2 or i_batch > 16)):
             info = {
-                "episode": i_episode,
+                "batch": i_batch,
                 "arch": args.__dict__,
                 "state_dict": policy.state_dict(),
                 "optimizer" : optimizer.state_dict(),
@@ -192,29 +197,32 @@ def main(args):
                 "ewma_win_rate": ewma_win_rate,
             }
             filename = "{base}_{i:06d}.pth.tar".format(
-                base=args.save_path, i=i_episode)
+                base=args.save_path, i=i_batch)
             with open(filename, "wb") as f:
                 torch.save(info, f)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Would you like to play a game?")
+        description="Shall we play a game?")
     parser.add_argument("--lr", type=float, default=1e-3, metavar="L",
                         help="learning rate (default: 1e-3)")
-    parser.add_argument("--gamma", type=float, default=0.99, metavar="G",
+    parser.add_argument("-g", "--gamma", type=float, default=0.99, metavar="G",
                         help="discount factor (default: 0.99)")
-    parser.add_argument("--seed", type=int, default=543, metavar="N",
+    parser.add_argument("-s", "--seed", type=int, default=543, metavar="N",
                         help="random seed (default: 543)")
+    parser.add_argument("-m", "--minibatch", type=int, default=25, metavar="M",
+                        help="Minibatch size (default: 25)")
     parser.add_argument("--render", action="store_true",
                         help="render the environment")
     parser.add_argument("--cpu", dest="gpu", action="store_false",
                         help="run on the CPU, don't use cuda (default: False)")
-    parser.add_argument("--log-interval", type=int, default=10, metavar="N",
+    parser.add_argument("-i", "--log-interval", type=int, default=10, metavar="N",
                         help="interval between training status logs (default: 10)")
-    parser.add_argument("--objective", type=str, default="win",
+    parser.add_argument("-o", "--objective", type=str, default="win",
                         choices=["win", "lose", "length"],
                         help="What's the objective of our RL agent?")
-    parser.add_argument("--save_path", type=str, default=None, metavar="F",
+    parser.add_argument("--save-path", type=str, default=None, metavar="F",
                         help="Base path to save model parameters to (optional).")
 
     main(parser.parse_args())
