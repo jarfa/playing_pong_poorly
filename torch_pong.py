@@ -77,42 +77,38 @@ class Policy(nn.Module):
         return action.item() + 2
 
     def finish_episode(self, objective, gamma, optimizer):
-        # assert self.num_frames[-1] == 0  # remove after the sanity test
-        # del self.num_frames[-1]  #this should be a trailing 0
         game_rewards = np.array([r for r in self.rewards if r != 0])
 
         win_rate = sum(game_rewards == 1) / len(game_rewards)
         frames_per_game = sum(self.num_frames) / len(self.num_frames)
 
+        N = len(self.rewards)
+        rewards_to_learn = [0] * N
         if objective in ("win", "lose"):
             mult = -1.0 if objective == "win" else 1.0
             # The rewards vector is mostly 0s, with -1s and 1s marking where
             # individual points were scored. We're iterating through it
             # backwards, decaying rewards up to where points were scored.
             R = 0
-            rewards_to_learn = []
-            for r in self.rewards[::-1]:
-                # If a point was scored, don't pull the decayed reward from the
-                # next frame - just use the score
-                R = (gamma * R +  r) if r == 0 else r
-                rewards_to_learn.insert(0, mult * R)
+            for i in reversed(range(N)):
+                r = self.rewards[i]
+                R = gamma * R if r == 0 else r
+                rewards_to_learn[i] = mult * R
 
         elif objective == "length":
-            rewards_to_learn = [0] * len(self.rewards)
             match_index = len(self.num_frames) - 1 #start by looking at the last game
-            for i, r in enumerate(reversed(self.rewards)):
-                indx = len(self.rewards) - i - 1
-                if r == 0:
+            for i in reversed(range(N)):
+                if i < (N - 1) and self.rewards[i] == 0:
                     # This frame didn't have a point scored, so pull the
                     # eventual number of frames from the next frame
-                    rewards_to_learn[indx] = rewards_to_learn[indx + 1]
+                    rewards_to_learn[i] = rewards_to_learn[i + 1]
                     # I don't think we should be decaying the reward for this
                     # type of learning, all moves made were equally important
                     # in prolonging the match.
                 else:
-                    # This marks a point scored, so record the number of frames
-                    # it took
-                    rewards_to_learn[indx] = -1.0 * self.num_frames[match_index]
+                    # rewards != 0 marks a point scored, so record the number of
+                    # frames it took
+                    rewards_to_learn[i] = -1.0 * self.num_frames[match_index]
                     match_index -= 1
 
         rewards_to_learn = torch.tensor(rewards_to_learn)
