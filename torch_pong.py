@@ -7,6 +7,7 @@ and https://gist.github.com/karpathy/a4166c7fe253700972fcbc77e4ea32c5
 import argparse
 import logging
 from itertools import count
+from sys import exit
 
 import numpy as np
 import gym
@@ -179,7 +180,8 @@ def main(args):
             ewma_win_rate = update_ewma(ewma_win_rate, win_rate)
             ewma_frames = update_ewma(ewma_frames, frames_per_game)
 
-        if i_batch % args.log_interval == 0:
+        last_episode = args.num_batches and i_batch == args.num_batches
+        if last_episode or i_batch % args.log_interval == 0:
             logging.info(
                 "Batch #%d\tLast Win Rate: %.2f\tEWMA Win Rate: %.2f\t"
                 "Frames/Game: %d\tEWMA Frames/Game: %.1f",
@@ -187,9 +189,13 @@ def main(args):
                 frames_per_game, ewma_frames
             )
 
-        # only save when i_batch is a power of 2, but skip the range [2,16]
-        if (args.save_path and (i_batch & (i_batch - 1) == 0) and
-            (i_batch < 2 or i_batch > 16)):
+        # only save when at the end, or when i_batch is a power of 2 (but skip
+        # the range [2,16])
+        power_of_two = i_batch & (i_batch - 1) == 0
+        if (
+            args.save_path and (last_episode or
+            (power_of_two and (i_batch < 2 or i_batch > 16)))
+        ):
             info = {
                 "batch": i_batch,
                 "arch": args.__dict__,
@@ -203,6 +209,9 @@ def main(args):
             with open(filename, "wb") as f:
                 torch.save(info, f)
 
+        if last_episode:
+            exit()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -215,6 +224,8 @@ if __name__ == "__main__":
                         help="random seed (default: 543)")
     parser.add_argument("-m", "--minibatch", type=int, default=25, metavar="M",
                         help="Minibatch size (default: 25)")
+    parser.add_argument("-n", "--num_batches", type=int, metavar="N",
+                        default=None, help="Maximum # of batches (default: inf)")
     parser.add_argument("--render", action="store_true",
                         help="render the environment")
     parser.add_argument("--cpu", dest="gpu", action="store_false",
