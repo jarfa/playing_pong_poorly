@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.distributions import Categorical
+from torch.distributions import Bernoulli
 
 logging.basicConfig(
     format="%(asctime)s %(message)s",
@@ -51,7 +51,7 @@ class Policy(nn.Module):
     def __init__(self, D, H, gpu):
         super(Policy, self).__init__()
         self.hidden = torch.nn.Linear(D, H)
-        self.out = torch.nn.Linear(H, 2)
+        self.out = torch.nn.Linear(H, 1)
         self.gpu = gpu
 
         self.saved_log_probs = []
@@ -61,7 +61,7 @@ class Policy(nn.Module):
     def forward(self, x):
         h = F.relu(self.hidden(x))
         logp = self.out(h)
-        return F.softmax(logp, dim=1)
+        return F.sigmoid(logp)
 
     def select_action(self, state):
         processed_state = prepro(state)
@@ -70,18 +70,17 @@ class Policy(nn.Module):
             tensor_state = tensor_state.cuda()
 
         probs = self.__call__(tensor_state)
-        m = Categorical(probs)
+        m = Bernoulli(probs)
         action = m.sample()
         self.saved_log_probs.append(m.log_prob(action))
 
-        # action is in {0,1}, but for the gym API it needs to be in {2,3}
-        return action.item() + 2
+        # action is in {0.0,1.0}, but for the gym API it needs to be in {2,3}
+        return int(action.item()) + 2
 
     def finish_episode(self, objective, gamma, optimizer):
         game_rewards = np.array([r for r in self.rewards if r != 0])
-
-        win_rate = sum(game_rewards == 1) / len(game_rewards)
-        frames_per_game = sum(self.num_frames) / len(self.num_frames)
+        win_rate = np.mean(game_rewards == 1)
+        frames_per_game = np.mean(self.num_frames)
 
         N = len(self.rewards)
         rewards_to_learn = [0] * N
@@ -119,7 +118,7 @@ class Policy(nn.Module):
                             ) / (rewards_to_learn.std() + EPSILON)
 
         policy_loss = torch.dot(
-            torch.cat(self.saved_log_probs),
+            torch.cat(self.saved_log_probs).squeeze(),
             rewards_to_learn
         )
         final_loss = policy_loss.sum()
