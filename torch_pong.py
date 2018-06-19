@@ -20,7 +20,7 @@ from torch.distributions import Bernoulli
 
 logging.basicConfig(
     format="%(asctime)s %(message)s",
-    datefmt="%Y.%m.%d %I:%M:%S",
+    datefmt="%Y.%m.%d %H:%M:%S",
     level=logging.DEBUG
 )
 
