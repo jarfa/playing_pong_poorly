@@ -147,7 +147,7 @@ def main(args):
     ewma_win_rate = 0
     ewma_frames = 0
     current_frames = 0
-    for i_batch in count(1):
+    for i_batch in count(0):
         state = environment.reset()
         for _ in range(args.minibatch):
             # args.minibatch is the number of games to play. Let's define a game
@@ -171,6 +171,7 @@ def main(args):
 
         win_rate, frames_per_game = policy.finish_episode(
             args.objective, args.gamma, optimizer)
+
         # Take the first 20 episodes to 'seed' the EWMA, then do it the normal way
         if i_batch <= 20:
             ewma_win_rate = update_mean(i_batch, ewma_win_rate, win_rate)
@@ -213,28 +214,46 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Shall we play a game?")
-    parser.add_argument("--lr", type=float, default=1e-3, metavar="L",
-                        help="learning rate (default: 1e-3)")
-    parser.add_argument("-g", "--gamma", type=float, default=0.99, metavar="G",
-                        help="discount factor (default: 0.99)")
-    parser.add_argument("-s", "--seed", type=int, default=543, metavar="N",
-                        help="random seed (default: 543)")
-    parser.add_argument("-m", "--minibatch", type=int, default=25, metavar="M",
-                        help="Minibatch size (default: 25)")
-    parser.add_argument("-n", "--num_batches", type=int, metavar="N",
-                        default=None, help="Maximum # of batches (default: inf)")
-    parser.add_argument("--render", action="store_true",
-                        help="render the environment")
-    parser.add_argument("--cpu", dest="gpu", action="store_false",
-                        help="run on the CPU, don't use cuda (default: False)")
-    parser.add_argument("-i", "--log-interval", type=int, default=10, metavar="N",
-                        help="interval between training status logs (default: 10)")
-    parser.add_argument("-o", "--objective", type=str, default="win",
-                        choices=["win", "lose", "length"],
-                        help="What's the objective of our RL agent?")
-    parser.add_argument("--save-path", type=str, default=None, metavar="F",
-                        help="Base path to save model parameters to (optional).")
+    parser = argparse.ArgumentParser(description="Shall we play a game?")
+    parser.add_argument(
+        "--lr", metavar="L", type=float, default=1e-3,
+        help="learning rate (default: 1e-3)"
+    )
+    parser.add_argument(
+        "-g", "--gamma", metavar="G", type=float, default=0.99,
+        help="discount factor (default: 0.99)"
+    )
+    parser.add_argument(
+        "-s", "--seed", metavar="S", type=int, default=543,
+        help="random seed (default: 543)"
+    )
+    parser.add_argument(
+        "-m", "--minibatch", metavar="M", type=int, default=25,
+        help="Minibatch size (default: 25)"
+    )
+    parser.add_argument(
+        "-n", "--num_batches", metavar="N", type=int,
+        default=None, help="Maximum # of batches (default: inf)"
+    )
+    parser.add_argument(
+        "--render", action="store_true", help="render the environment"
+    )
+    parser.add_argument(
+        "--cpu", dest="gpu", action="store_false",
+        help="run on the CPU, don't use cuda (default: False)"
+    )
+    parser.add_argument(
+        "-i", "--log-interval", metavar="I", type=int, default=10,
+        help="interval between training status logs (default: 10)"
+    )
+    parser.add_argument(
+        "-o", "--objective", type=str, default="win",
+        choices=["win", "lose", "length"],
+        help="What's the objective of our RL agent?"
+    )
+    parser.add_argument(
+        "--save-path", type=str, default=None, metavar="F",
+        help="Base path to save model parameters to (optional)."
+    )
 
     main(parser.parse_args())
