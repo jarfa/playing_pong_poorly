@@ -32,6 +32,8 @@ def update_mean(n, old, new):
 
 
 def update_ewma(old, new, alpha=0.05):
+    if old is None:
+        return new
     return (1. - alpha) * old + alpha * new
 
 
@@ -77,7 +79,7 @@ class Policy(nn.Module):
         # action is in {0.0,1.0}, but for the gym API it needs to be in {2,3}
         return int(action.item()) + 2
 
-    def finish_episode(self, objective, gamma, optimizer):
+    def finish_episode(self, objective, gamma):
         game_rewards = np.array([r for r in self.rewards if r != 0])
         win_rate = np.mean(game_rewards == 1)
         frames_per_game = np.mean(self.num_frames)
@@ -123,15 +125,12 @@ class Policy(nn.Module):
         )
         final_loss = policy_loss.sum()
 
-        optimizer.zero_grad()
-        final_loss.backward()
-        optimizer.step()
+        return win_rate, frames_per_game, final_loss
 
+    def cleanup(self):
         del self.rewards[:]
         del self.num_frames[:]
         del self.saved_log_probs[:]
-
-        return win_rate, frames_per_game
 
 
 def main(args):
@@ -143,9 +142,11 @@ def main(args):
     if args.gpu:
         policy = policy.cuda()
     optimizer = optim.Adam(policy.parameters(), lr=args.lr)
+    # TODO: try optim.lr_scheduler.ReduceLROnPlateau
 
     ewma_win_rate = 0
     ewma_frames = 0
+    ewma_loss = 0
     current_frames = 0
     for i_batch in count(0):
         state = environment.reset()
@@ -169,25 +170,36 @@ def main(args):
             policy.num_frames.append(current_frames)
             current_frames = 0
 
-        win_rate, frames_per_game = policy.finish_episode(
-            args.objective, args.gamma, optimizer)
+        win_rate, frames_per_game, loss = policy.finish_episode(
+            args.objective, args.gamma)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        policy.cleanup()
 
         # Take the first 20 episodes to 'seed' the EWMA, then do it the normal way
-        if i_batch <= 20:
-            ewma_win_rate = update_mean(i_batch, ewma_win_rate, win_rate)
-            ewma_frames = update_mean(i_batch, ewma_frames, frames_per_game)
+        if i_batch < 20:
+            ewma_win_rate = update_mean(i_batch + 1, ewma_win_rate, win_rate)
+            ewma_frames = update_mean(i_batch + 1, ewma_frames, frames_per_game)
+            ewma_loss = update_mean(i_batch + 1, ewma_loss, loss.item())
         else:
             ewma_win_rate = update_ewma(ewma_win_rate, win_rate)
             ewma_frames = update_ewma(ewma_frames, frames_per_game)
+            ewma_loss = update_ewma(ewma_loss, loss.item())
 
         last_episode = args.num_batches and i_batch == args.num_batches
         if last_episode or i_batch % args.log_interval == 0:
-            logging.info(
-                "Batch #%d\tLast Win Rate: %.2f\tEWMA Win Rate: %.2f\t"
-                "Frames/Game: %d\tEWMA Frames/Game: %.1f",
-                i_batch, win_rate, ewma_win_rate,
-                frames_per_game, ewma_frames
-            )
+            metrics = [
+                "Batch: %d" % i_batch,
+                "Last Win Rate: %.2f" % win_rate,
+                "EWMA Win Rate: %.2f" % ewma_win_rate,
+                "Frames/Game: %d" % frames_per_game,
+                "EWMA Frames/Game: %.2f" % ewma_frames,
+                "EWMA Loss: %.3f" % ewma_loss,
+            ]
+            logging.info("\t" + "\t".join(metrics))
 
         # only save when at the end, or when i_batch is a power of 2 (but skip
         # the range [2,16])
