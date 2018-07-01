@@ -7,7 +7,6 @@ and https://gist.github.com/karpathy/a4166c7fe253700972fcbc77e4ea32c5
 import argparse
 import logging
 from itertools import count
-from sys import exit
 
 import numpy as np
 import gym
@@ -189,7 +188,7 @@ def main(args):
             ewma_frames = update_ewma(ewma_frames, frames_per_game)
             ewma_loss = update_ewma(ewma_loss, loss.item())
 
-        last_episode = args.num_batches and i_batch == args.num_batches
+        last_episode = args.num_batches and i_batch == (args.num_batches - 1)
         if last_episode or i_batch % args.log_interval == 0:
             metrics = [
                 "Batch: %d" % i_batch,
@@ -202,11 +201,11 @@ def main(args):
             logging.info("\t" + "\t".join(metrics))
 
         # only save when at the end, or when i_batch is a power of 2 (but skip
-        # the range [2,16])
+        # the range [1,16])
         power_of_two = i_batch & (i_batch - 1) == 0
         if (
-            args.save_path and (last_episode or
-            (power_of_two and (i_batch < 2 or i_batch > 16)))
+            args.save_path and (last_episode or i_batch == 0 or
+            (power_of_two and i_batch > 16))
         ):
             info = {
                 "batch": i_batch,
@@ -222,7 +221,7 @@ def main(args):
                 torch.save(info, f)
 
         if last_episode:
-            exit()
+            return
 
 
 if __name__ == "__main__":
